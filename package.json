@@ -1,27 +1,31 @@
 {
-  "name": "dietary-intelligence-server",
+  "name": "ai-dietary-intelligence",
   "version": "1.0.0",
-  "description": "Backend API for AI Dietary Intelligence",
-  "main": "server.js",
+  "description": "AI Dietary Intelligence Platform",
+  "main": "server/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
-    "migrate": "node db/migrate.js",
-    "test": "node --test test/*.test.js"
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "dev:client": "npm --prefix client run dev",
+    "build:client": "npm --prefix client run build",
+    "lint:client": "npm --prefix client run lint",
+    "migrate": "node server/db/migrate.js",
+    "seed:knowledge": "node server/ai/agents/seedFoodKnowledge.js",
+    "reindex:ingredients": "node server/ai/reindexIngredients.js",
+    "test": "node --test server/test/validator.test.js server/test/agents.test.js server/test/knowledgeRAG.test.js server/test/retrievalTools.test.js server/test/wholeFlow.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@google/genai": "^2.21.0",
+    "@google/genai": "^2.24.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "multer": "^2.3.0",
-    "mysql2": "^3.24.5",
-    "nodemailer": "^10.0.6",
-    "openai": "^7.13.0"
+    "multer": "^2.4.0",
+    "mysql2": "^3.24.4",
+    "nodemailer": "^10.0.11"
   }
 }

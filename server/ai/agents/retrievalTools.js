@@ -1,11 +1,26 @@
-// "Retrieval" layer for the agentic RAG. These are plain, safe database
-// readers. Every query is scoped to ONE user id taken from the logged-in
-// session, so an agent can never read another user's data.
+// "Retrieval" layer for agentic RAG.
+//
+// All patient-specific retrieval is strictly scoped to `userId` taken from the
+// authenticated session, ensuring complete patient data isolation.
+//
+// Key enhancements:
+// - Uses `normalizeIngredientKey` for canonical matching.
+// - Calculates Jaccard similarity (|A ∩ B| / |A ∪ B|) for similar-ingredient candidate ranking.
+// - Groups historical candidates by `food_image_id` (real analysis identifier), NOT just food name.
+// - Excludes the current food analysis from its own history.
+// - Separates exact-food history from partial/similar food history.
+// - Filters Food Genome experiences to relevant food/ingredient context.
+// - Safe handling of empty ingredient sets and zero-result queries.
 
 const { parseJsonValue } = require("../jsonUtils");
+const {
+  normalizeFoodName,
+  normalizeIngredientKey,
+  jaccardSimilarity,
+} = require("../normalization");
 
 function keyOf(text) {
-  return String(text || "").trim().toLowerCase();
+  return normalizeFoodName(text);
 }
 
 function createRetrievalTools({
@@ -15,38 +30,56 @@ function createRetrievalTools({
   personalization,
   learning,
   foodAnalysis,
+  currentFoodImageId = null,
 }) {
-  const currentKey = keyOf(foodAnalysis.foodName);
+  const currentCanonicalName = normalizeFoodName(foodAnalysis.foodName);
 
-  const currentIngredientKeys = [
+  const currentIngredientList = [
     ...foodAnalysis.ingredients.visible,
     ...foodAnalysis.ingredients.suspected,
     ...foodAnalysis.ingredients.traditional,
-  ].map((item) => keyOf(item.name));
+  ];
+
+  const currentIngredientKeys = [
+    ...new Set(
+      currentIngredientList
+        .map((item) => normalizeIngredientKey(item.name))
+        .filter(Boolean)
+    ),
+  ];
+
+  const currentIngredientSet = new Set(currentIngredientKeys);
 
   async function loadHistoryRows(limit = 300) {
-    const [rows] = await db.query(
-      `SELECT food_name, status, source, context, feedback_data, created_at
-         FROM food_history
-        WHERE user_id = ?
-          AND food_name IS NOT NULL
-          AND food_name <> ''
-        ORDER BY created_at DESC
-        LIMIT ?`,
-      [userId, limit]
-    );
+    if (!db) return [];
+    try {
+      const [rows] = await db.query(
+        `SELECT id, food_name, status, source, context, feedback_data, created_at
+           FROM food_history
+          WHERE user_id = ?
+            AND food_name IS NOT NULL
+            AND food_name <> ''
+          ORDER BY created_at DESC
+          LIMIT ?`,
+        [userId, limit]
+      );
 
-    return rows.map((row) => {
-      const feedback = parseJsonValue(row.feedback_data, {}) || {};
-      return {
-        foodName: row.food_name,
-        status: row.status || feedback.status || "",
-        reaction: feedback.reaction || "",
-        notes: feedback.notes || "",
-        source: row.source,
-        recordedAt: row.created_at,
-      };
-    });
+      return rows.map((row) => {
+        const feedback = parseJsonValue(row.feedback_data, {}) || {};
+        return {
+          id: row.id,
+          foodName: row.food_name,
+          canonicalName: normalizeFoodName(row.food_name),
+          status: row.status || feedback.status || "",
+          reaction: feedback.reaction || "",
+          notes: feedback.notes || "",
+          source: row.source,
+          recordedAt: row.created_at,
+        };
+      });
+    } catch (_error) {
+      return [];
+    }
   }
 
   const tools = {
@@ -59,110 +92,226 @@ function createRetrievalTools({
         weight: patient.weight,
         bloodPressure: patient.bloodPressure,
         bloodSugar: patient.bloodSugar,
-        diseases: patient.diseases,
-        allergies: patient.allergies,
-        foodPreferences: patient.foodPreferences,
+        diseases: patient.diseases || [],
+        allergies: patient.allergies || [],
+        foodPreferences: patient.foodPreferences || [],
       };
     },
 
     get_medical_report() {
-      // This is the "prescription" / report data the user uploaded.
       if (!patient.medicalReportData) {
         return { available: false };
       }
       return { available: true, data: patient.medicalReportData };
     },
 
+    /**
+     * Search patient's past food feedback.
+     * Distinguishes exact food name matches from related/partial matches.
+     */
     async search_food_history({ query } = {}) {
-      const wanted = keyOf(query) || currentKey;
+      const searchKey = query ? normalizeFoodName(query) : currentCanonicalName;
       const rows = await loadHistoryRows();
 
-      const matches = rows.filter((row) => {
-        const name = keyOf(row.foodName);
-        return (
-          name === wanted ||
-          name.includes(wanted) ||
-          wanted.includes(name)
-        );
-      });
+      const exactMatches = [];
+      const partialMatches = [];
+
+      for (const row of rows) {
+        const rowKey = row.canonicalName;
+        if (rowKey === searchKey) {
+          exactMatches.push({
+            foodName: row.foodName,
+            status: row.status,
+            reaction: row.reaction,
+            notes: row.notes,
+            recordedAt: row.recordedAt,
+          });
+        } else if (
+          searchKey &&
+          (rowKey.includes(searchKey) || searchKey.includes(rowKey))
+        ) {
+          partialMatches.push({
+            foodName: row.foodName,
+            status: row.status,
+            reaction: row.reaction,
+            notes: row.notes,
+            recordedAt: row.recordedAt,
+          });
+        }
+      }
 
       return {
-        query: wanted,
-        totalMatches: matches.length,
-        matches: matches.slice(0, 15),
+        query: searchKey,
+        exactMatchCount: exactMatches.length,
+        exactMatches: exactMatches.slice(0, 10),
+        relatedMatchCount: partialMatches.length,
+        relatedMatches: partialMatches.slice(0, 10),
+        // For backwards compatibility
+        matches: [...exactMatches, ...partialMatches].slice(0, 15),
       };
     },
 
+    /**
+     * Finds previous foods analyzed by this authenticated patient that share
+     * ingredients with the current food.
+     *
+     * Evaluates Jaccard similarity and groups candidates by their real
+     * `food_image_id` so distinct food analyses remain separate.
+     */
     async find_similar_by_ingredients({ ingredients } = {}) {
       const asked = Array.isArray(ingredients)
-        ? ingredients.map(keyOf).filter(Boolean)
+        ? ingredients.map(normalizeIngredientKey).filter(Boolean)
         : [];
+
       const lookFor = asked.length ? asked : currentIngredientKeys;
 
-      if (lookFor.length === 0) {
-        return { ingredientsChecked: [], similarFoods: [] };
+      if (!db || lookFor.length === 0) {
+        return { ingredientsChecked: lookFor, similarFoods: [] };
       }
 
-      // Past foods this user analyzed that share ingredients.
-      const [ingredientRows] = await db.query(
-        `SELECT fi.food_image_id, fi.ingredient_key, img.food_name
-           FROM food_ingredients fi
-           JOIN food_images img ON img.id = fi.food_image_id
-          WHERE fi.user_id = ?
-            AND fi.ingredient_key IN (?)
-            AND img.food_name IS NOT NULL
-          ORDER BY fi.created_at DESC
-          LIMIT 300`,
-        [userId, lookFor]
-      );
+      try {
+        // Retrieve all ingredients for any food_image of this user that contains at least one target ingredient
+        const [candidateImageRows] = await db.query(
+          `SELECT DISTINCT fi.food_image_id
+             FROM food_ingredients fi
+            WHERE fi.user_id = ?
+              AND fi.ingredient_key IN (?)
+            LIMIT 100`,
+          [userId, lookFor]
+        );
 
-      const history = await loadHistoryRows();
-      const byFood = new Map();
+        const candidateIds = candidateImageRows
+          .map((r) => r.food_image_id)
+          .filter((id) => id && id !== currentFoodImageId);
 
-      for (const row of ingredientRows) {
-        const name = keyOf(row.food_name);
-        if (name === currentKey) continue;
-        if (!byFood.has(name)) {
-          byFood.set(name, {
-            foodName: row.food_name,
-            sharedIngredients: new Set(),
+        if (candidateIds.length === 0) {
+          return { ingredientsChecked: lookFor, similarFoods: [] };
+        }
+
+        // Fetch complete ingredient sets for these candidate food analyses
+        const [allIngredientRows] = await db.query(
+          `SELECT fi.food_image_id, fi.ingredient_name, fi.ingredient_key,
+                  img.food_name, img.uploaded_at
+             FROM food_ingredients fi
+             JOIN food_images img ON img.id = fi.food_image_id
+            WHERE fi.user_id = ?
+              AND fi.food_image_id IN (?)
+            ORDER BY fi.food_image_id, fi.created_at ASC`,
+          [userId, candidateIds]
+        );
+
+        const history = await loadHistoryRows();
+
+        // Group by food_image_id (real distinct food-analysis identifier)
+        const analysisMap = new Map();
+        for (const row of allIngredientRows) {
+          const fid = row.food_image_id;
+          if (!analysisMap.has(fid)) {
+            analysisMap.set(fid, {
+              foodImageId: fid,
+              foodName: row.food_name || "Unknown food",
+              canonicalName: normalizeFoodName(row.food_name),
+              uploadedAt: row.uploaded_at,
+              allIngredients: new Set(),
+              ingredientNames: [],
+            });
+          }
+          const item = analysisMap.get(fid);
+          const ikey = row.ingredient_key || normalizeIngredientKey(row.ingredient_name);
+          if (ikey) {
+            item.allIngredients.add(ikey);
+            item.ingredientNames.push(row.ingredient_name);
+          }
+        }
+
+        // Score each candidate analysis using Jaccard similarity and shared ingredient count
+        const querySet = new Set(lookFor);
+        const candidates = [];
+
+        for (const [fid, entry] of analysisMap.entries()) {
+          // Exclude exact matches to current food if it's the same food name
+          if (entry.canonicalName === currentCanonicalName && fid === currentFoodImageId) {
+            continue;
+          }
+
+          const shared = [];
+          for (const ing of entry.allIngredients) {
+            if (querySet.has(ing)) {
+              shared.push(ing);
+            }
+          }
+
+          if (shared.length === 0) continue;
+
+          const jaccard = jaccardSimilarity(querySet, entry.allIngredients);
+          const jaccardPercent = Math.round(jaccard * 100);
+
+          // Find past reaction/feedback matching this food's name
+          const pastReactions = history
+            .filter((h) => h.canonicalName === entry.canonicalName)
+            .map((h) => ({
+              status: h.status,
+              reaction: h.reaction,
+              notes: h.notes,
+              recordedAt: h.recordedAt,
+            }))
+            .slice(0, 3);
+
+          candidates.push({
+            foodImageId: fid,
+            foodName: entry.foodName,
+            sharedIngredients: shared,
+            sharedIngredientCount: shared.length,
+            totalIngredients: entry.allIngredients.size,
+            similarityScore: jaccardPercent,
+            pastReactions,
+            selectionReason: `Shares ${shared.length} ingredient${shared.length > 1 ? "s" : ""} (${shared.slice(0, 4).join(", ")}); Jaccard similarity: ${jaccardPercent}%`,
           });
         }
-        byFood.get(name).sharedIngredients.add(row.ingredient_key);
+
+        // Sort by Jaccard similarity descending, then shared ingredient count descending
+        candidates.sort((a, b) => {
+          if (b.similarityScore !== a.similarityScore) {
+            return b.similarityScore - a.similarityScore;
+          }
+          return b.sharedIngredientCount - a.sharedIngredientCount;
+        });
+
+        return {
+          ingredientsChecked: lookFor,
+          similarFoods: candidates.slice(0, 8),
+        };
+      } catch (_error) {
+        return { ingredientsChecked: lookFor, similarFoods: [] };
       }
-
-      const similarFoods = [...byFood.entries()]
-        .map(([name, entry]) => {
-          const reactions = history
-            .filter((h) => keyOf(h.foodName) === name)
-            .slice(0, 5);
-          return {
-            foodName: entry.foodName,
-            sharedIngredients: [...entry.sharedIngredients],
-            pastReactions: reactions,
-          };
-        })
-        .sort(
-          (a, b) =>
-            b.sharedIngredients.length - a.sharedIngredients.length
-        )
-        .slice(0, 8);
-
-      return { ingredientsChecked: lookFor, similarFoods };
     },
 
+    /**
+     * Retrieves Food Genome summary.
+     * Prevents unrelated recent experiences from polluting evidence for this food.
+     */
     get_food_genome_summary() {
       const preferences = (learning.preferences || []).filter(
-        (item) => keyOf(item.foodName) === currentKey
+        (item) => normalizeFoodName(item.foodName) === currentCanonicalName
       );
       const patterns = (learning.learnedPatterns || []).filter(
-        (item) => keyOf(item.foodName) === currentKey
+        (item) => normalizeFoodName(item.foodName) === currentCanonicalName
       );
+
+      // Only include recent experiences that share relevance to the current food
+      const relevantExperiences = (learning.recentExperiences || [])
+        .filter((item) => {
+          const itemKey = normalizeFoodName(item.foodName);
+          return itemKey === currentCanonicalName;
+        })
+        .slice(0, 5);
 
       return {
         thisFoodPreferences: preferences,
         thisFoodLearnedPatterns: patterns,
-        recentExperiences: (learning.recentExperiences || []).slice(0, 8),
+        relevantRecentExperiences: relevantExperiences,
+        // Kept for backward compatibility
+        recentExperiences: relevantExperiences,
         totalFeedback: personalization.foodGenome?.totalFeedback ?? 0,
       };
     },
@@ -211,7 +360,7 @@ const TOOL_DECLARATIONS = [
   {
     name: "find_similar_by_ingredients",
     description:
-      "Find other foods the patient has eaten before that share ingredients with this food, together with the reactions they had.",
+      "Find other foods the patient has eaten before that share ingredients with this food, ranked by Jaccard similarity and shared ingredient counts, with past reactions.",
     parameters: {
       type: "object",
       properties: {
@@ -227,7 +376,7 @@ const TOOL_DECLARATIONS = [
   {
     name: "get_food_genome_summary",
     description:
-      "Get the patient's Food Genome learning: preferences and learned reaction patterns.",
+      "Get the patient's Food Genome learning: preferences and learned reaction patterns relevant to this food.",
     parameters: { type: "object", properties: {} },
   },
   {

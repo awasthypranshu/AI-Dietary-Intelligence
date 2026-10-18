@@ -14,6 +14,7 @@ const { getModelName } = require("../ai/geminiJson");
 const { validateFoodAnalysis } = require("../ai/foodAnalysisValidator");
 const { runFoodAgents } = require("../ai/agents/orchestrator");
 const { parseJsonValue } = require("../ai/jsonUtils");
+const { normalizeIngredientKey } = require("../ai/normalization");
 
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
@@ -146,7 +147,7 @@ function registerFoodIntelligenceRoutes({
         foodImageId,
         userId,
         item.name,
-        item.name.trim().toLowerCase(),
+        normalizeIngredientKey(item.name) || item.name.trim().toLowerCase(),
         item.category,
         item.confidence,
         item.role || null,
@@ -278,8 +279,8 @@ function registerFoodIntelligenceRoutes({
       await db.query(
         `INSERT INTO food_agent_reports
            (id, user_id, food_image_id, verdict, verdict_json,
-            personal_context_json, variants_json, agent_errors)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            personal_context_json, variants_json, knowledge_json, agent_errors)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           reportId,
           userId,
@@ -288,6 +289,7 @@ function registerFoodIntelligenceRoutes({
           JSON.stringify(result.verdict),
           JSON.stringify(result.personalContext),
           JSON.stringify(result.variants),
+          JSON.stringify(result.knowledge),
           JSON.stringify(result.agentErrors),
         ]
       );
@@ -298,6 +300,7 @@ function registerFoodIntelligenceRoutes({
         verdict: result.verdict,
         personalContext: result.personalContext,
         variants: result.variants,
+        knowledge: result.knowledge,
         agentErrors: result.agentErrors,
       });
     } catch (error) {

@@ -5,7 +5,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node --test test/validator.test.js test/agents.test.js test/knowledgeRAG.test.js test/retrievalTools.test.js test/wholeFlow.test.js",
+    "migrate": "node db/migrate.js",
+    "seed:knowledge": "node ai/agents/seedFoodKnowledge.js",
+    "reindex:ingredients": "node ai/reindexIngredients.js"
   },
   "keywords": [],
   "author": "",

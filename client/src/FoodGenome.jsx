@@ -10,6 +10,8 @@ const API_URL =
   import.meta.env.VITE_API_URL ||
   "http://127.0.0.1:5001";
 
+const EMPTY_ARRAY = [];
+
 function FoodGenome({
   patientData,
   onContinue,
@@ -135,32 +137,32 @@ function FoodGenome({
   const lovedFoods =
     Array.isArray(foodGenome?.lovedFoods)
       ? foodGenome.lovedFoods
-      : [];
+      : EMPTY_ARRAY;
 
   const likedFoods =
     Array.isArray(foodGenome?.likedFoods)
       ? foodGenome.likedFoods
-      : [];
+      : EMPTY_ARRAY;
 
   const neutralFoods =
     Array.isArray(foodGenome?.neutralFoods)
       ? foodGenome.neutralFoods
-      : [];
+      : EMPTY_ARRAY;
 
   const dislikedFoods =
     Array.isArray(foodGenome?.dislikedFoods)
       ? foodGenome.dislikedFoods
-      : [];
+      : EMPTY_ARRAY;
 
   const reactions =
     Array.isArray(foodGenome?.reactions)
       ? foodGenome.reactions
-      : [];
+      : EMPTY_ARRAY;
 
   const foods =
     Array.isArray(foodGenome?.foods)
       ? foodGenome.foods
-      : [];
+      : EMPTY_ARRAY;
 
   const mealPlanFeedback =
     Array.isArray(

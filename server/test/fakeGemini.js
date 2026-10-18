@@ -121,7 +121,7 @@ function createFakeGemini(overrides = {}) {
         if (flat.includes("Using ONLY the tool results")) {
           return reply(overrides.context || CONTEXT_JSON);
         }
-        if (flat.includes("Food Variant Agent")) {
+        if (flat.includes("Food Variant")) {
           if (overrides.variantsText !== undefined) return { text: overrides.variantsText };
           return reply(overrides.variants || VARIANTS_JSON);
         }

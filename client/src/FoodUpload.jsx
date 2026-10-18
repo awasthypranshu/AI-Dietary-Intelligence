@@ -827,89 +827,196 @@ function FoodUpload({
         {variants && (
           <div className="food-result">
             <p className="section-label">
-              FOOD VARIANTS
+              FOOD VARIANTS & RECIPE INTELLIGENCE
             </p>
 
             <h2>
-              Other versions of this food
+              Documented & Alternative Versions
             </h2>
 
+            {agentResult?.knowledge?.dataSource === "knowledge_base" ? (
+              <p className="fi-muted">
+                <span className="fi-badge fi-badge-verified">
+                  ✓ Source-Backed Knowledge Catalog
+                </span>
+                Documented recipe variants and ingredient lists retrieved from culinary literature.
+              </p>
+            ) : (
+              <p className="fi-muted">
+                <span className="fi-badge fi-badge-unverified">
+                  Model-Generated Suggestions
+                </span>
+                No catalog records matched this exact dish. Alternatives below are AI suggestions.
+              </p>
+            )}
+
             <div className="fi-grid">
-              {variants.map((variant) => {
+              {variants.map((variant, index) => {
                 const vv =
                   variantVerdicts[
-                    variant.name.toLowerCase()
+                    (variant.name || "").toLowerCase().trim()
                   ];
+
+                const isVerified =
+                  variant.isVerified ||
+                  variant.dataSource === "knowledge_base";
 
                 return (
                   <div
                     className="fi-panel"
-                    key={variant.name}
+                    key={variant.variantId || variant.id || variant.name || `variant-${index}`}
                   >
-                    <h3>
-                      {variant.name}
-                      {variant.matchesUploadedFood && (
-                        <small>
-                          {" "}
-                          (closest to your photo)
-                        </small>
+                    <div style={{ marginBottom: "6px" }}>
+                      {isVerified ? (
+                        <span className="fi-badge fi-badge-verified">
+                          ✓ Verified Recipe
+                        </span>
+                      ) : (
+                        <span className="fi-badge fi-badge-unverified">
+                          AI Suggestion
+                        </span>
                       )}
-                    </h3>
+
+                      {variant.matchesUploadedFood && (
+                        <span className="fi-badge fi-badge-closest">
+                          Closest to photo
+                        </span>
+                      )}
+
+                      {variant.preparationMethod && (
+                        <span className="fi-badge fi-badge-method">
+                          {variant.preparationMethod}
+                        </span>
+                      )}
+                    </div>
+
+                    <h3>{variant.name}</h3>
 
                     <p className="fi-muted">
                       {variant.regionOrStyle}
                     </p>
+
                     <p>{variant.description}</p>
 
-                    {variant.ingredientChanges
-                      .added.length > 0 && (
-                      <p>
-                        <strong>Adds:</strong>{" "}
-                        {variant.ingredientChanges.added.join(
-                          ", "
+                    {/* Documented Ingredients from Knowledge Base */}
+                    {variant.documentedIngredients &&
+                      variant.documentedIngredients.length > 0 && (
+                        <div style={{ margin: "10px 0" }}>
+                          <strong style={{ fontSize: "0.88rem" }}>
+                            Documented Ingredients:
+                          </strong>
+                          <div style={{ marginTop: "4px" }}>
+                            {variant.documentedIngredients.map((ing, i) => {
+                              const presence =
+                                ing.presenceType ||
+                                ing.classification ||
+                                "typical";
+                              return (
+                                <span
+                                  key={i}
+                                  className={`fi-ing-tag fi-ing-${presence}`}
+                                  title={`Classification: ${presence}`}
+                                >
+                                  {ing.name}
+                                  {presence === "required" && " *"}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* Ingredient Changes relative to uploaded photo */}
+                    {variant.ingredientChanges && (
+                      <div style={{ fontSize: "0.85rem", margin: "6px 0" }}>
+                        {variant.ingredientChanges.added?.length > 0 && (
+                          <p style={{ margin: "2px 0" }}>
+                            <strong>Adds:</strong>{" "}
+                            {variant.ingredientChanges.added.join(", ")}
+                          </p>
                         )}
-                      </p>
+                        {variant.ingredientChanges.removed?.length > 0 && (
+                          <p style={{ margin: "2px 0" }}>
+                            <strong>Removes:</strong>{" "}
+                            {variant.ingredientChanges.removed.join(", ")}
+                          </p>
+                        )}
+                        {variant.ingredientChanges.substituted?.length > 0 && (
+                          <p style={{ margin: "2px 0" }}>
+                            <strong>Substitutes:</strong>{" "}
+                            {variant.ingredientChanges.substituted.join(", ")}
+                          </p>
+                        )}
+                      </div>
                     )}
-                    {variant.ingredientChanges
-                      .removed.length > 0 && (
-                      <p>
-                        <strong>Removes:</strong>{" "}
-                        {variant.ingredientChanges.removed.join(
-                          ", "
-                        )}
+
+                    {/* Nutrition comparison vs photo */}
+                    {variant.nutritionVsUploaded && (
+                      <p className="fi-muted">
+                        vs your photo - calories:{" "}
+                        {variant.nutritionVsUploaded.calories || "unknown"}
+                        , carbs:{" "}
+                        {variant.nutritionVsUploaded.carbohydrates || "unknown"}
+                        , fat:{" "}
+                        {variant.nutritionVsUploaded.fat || "unknown"}
                       </p>
                     )}
 
-                    <p className="fi-muted">
-                      vs your photo - calories:{" "}
-                      {
-                        variant.nutritionVsUploaded
-                          .calories
-                      }
-                      , carbs:{" "}
-                      {
-                        variant.nutritionVsUploaded
-                          .carbohydrates
-                      }
-                      , fat:{" "}
-                      {
-                        variant.nutritionVsUploaded
-                          .fat
-                      }
-                    </p>
+                    {/* Patient-specific concerns & allergy warnings */}
+                    {variant.patientSpecificConcerns &&
+                      variant.patientSpecificConcerns.length > 0 && (
+                        <div className="fi-variant-concerns">
+                          {variant.patientSpecificConcerns.map((c, i) => (
+                            <div key={i}>{c}</div>
+                          ))}
+                        </div>
+                      )}
 
+                    {/* Personalized Variant Verdict */}
                     {vv && (
                       <p
                         className={`fi-variant-verdict fi-verdict-${vv.verdict}`}
                       >
-                        {VERDICT_LABELS[
-                          vv.verdict
-                        ] || vv.verdict}
-                        {vv.reason
-                          ? `: ${vv.reason}`
-                          : ""}
+                        <strong>
+                          {VERDICT_LABELS[vv.verdict] || vv.verdict}
+                        </strong>
+                        {vv.reason ? `: ${vv.reason}` : ""}
                       </p>
                     )}
+
+                    {/* Source Citations */}
+                    {variant.sources && variant.sources.length > 0 && (
+                      <div style={{ marginTop: "8px" }}>
+                        <span className="fi-muted" style={{ fontSize: "0.8rem" }}>
+                          Source:{" "}
+                        </span>
+                        {variant.sources.map((src, i) => (
+                          <span key={i} style={{ fontSize: "0.82rem" }}>
+                            {src.title}
+                            {src.url ? (
+                              <>
+                                {" "}
+                                <a
+                                  href={src.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="fi-source-link"
+                                >
+                                  ↗ Link
+                                </a>
+                              </>
+                            ) : null}
+                            {i < variant.sources.length - 1 ? "; " : ""}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Uncertainty disclaimer */}
+                    <p className="fi-uncertainty">
+                      {variant.uncertainties?.[0] ||
+                        "Recipe based on documented culinary standards; preparation and physical ingredients in your specific serving may differ."}
+                    </p>
                   </div>
                 );
               })}

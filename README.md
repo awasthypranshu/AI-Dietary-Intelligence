@@ -1476,3 +1476,116 @@ Learn
 Personalize Again
 
 AI Dietary Intelligence is designed to evolve from a food-recognition and nutrition application into a personalized dietary intelligence platform.
+
+---
+
+## 43. Implemented Architecture: Agentic RAG & Food Variant Intelligence
+
+This section documents the live, production-grade architecture implemented in the MySQL/MariaDB and Express backend.
+
+```text
+                                [ User Food Photo ]
+                                         │
+                                         ▼
+                           foodRecognition (Gemini Vision)
+                                         │
+                ┌────────────────────────┴────────────────────────┐
+                ▼                                                 ▼
+      [ Patient-Specific RAG ]                       [ Shared Food Knowledge RAG ]
+      (retrievalTools.js)                            (variantRetriever.js)
+        - Patient Profile & Allergies                  - Canonical Dish & Aliases
+        - Medical Reports / Prescriptions              - Documented Regional Variants
+        - Historical Meals (Jaccard Similarity)        - Variant Ingredients (Required/Typical/Optional)
+        - Food Genome Preferences & Twin Context       - Published Provenance / Source Citations
+                │                                                 │
+                ▼                                                 ▼
+      personalContextAgent.js                        variantAgent.js
+        (Patient Evidence Report)                      (Source-backed Candidates & Differences)
+                │                                                 │
+                └────────────────────────┬────────────────────────┘
+                                         ▼
+                                  orchestrator.js
+                          (Enrich Variants with Per-Variant
+                              Patient Allergy Evidence)
+                                         │
+                                         ▼
+                                   verdictAgent.js
+               ┌─────────────────────────┴─────────────────────────┐
+               ▼                                                   ▼
+       Uploaded Food Verdict                             Per-Variant Verdicts
+       - Deterministic Allergy Guard                     - Documented Required Allergen -> AVOID
+       - Visible / Suspected / Traditional               - Optional / Regional Allergen -> CAUTION
+               │                                                   │
+               └─────────────────────────┬─────────────────────────┘
+                                         ▼
+                             POST /food-agents/analyze
+                                         │
+                                         ▼
+                               FoodUpload.jsx (UI)
+```
+
+### 1. Two Separate Retrieval Systems
+
+1. **Patient-Specific RAG (`server/ai/agents/retrievalTools.js`)**:
+   - Strictly scoped to the authenticated `userId`.
+   - **Jaccard Similarity Ranking**: Computes real set intersection over union for candidate food analyses rather than unranked substring matches.
+   - **Per-Analysis Grouping**: Candidates are keyed by distinct `food_image_id`, ensuring feedback and reactions attach to the exact historical meal event.
+   - **Food Genome Isolation**: Filters unrelated recent food experiences so only relevant ingredient preferences are supplied.
+   - **Non-Negotiable Health Constraints**: Serious allergies, chronic conditions, and medication interactions are always preserved regardless of historical food similarity.
+
+2. **Shared Food-Knowledge Retrieval (`server/ai/foodKnowledge/variantRetriever.js`)**:
+   - Multi-tier deterministic SQL retrieval: Exact Canonical Name -> Verified Aliases (`food_knowledge_aliases`) -> Style/Region ranking.
+   - Structured Relational Model: Retrieves variant details, preparation method, citations (`food_sources`), and ingredient classification (`required`, `typical`, `optional`, `regional`, `substitution`).
+   - Clean Fallback: If no catalog entry is found, Gemini suggestions are clearly labeled as `isCatalogMatch: false` and `unverified`.
+
+### 2. Database Schema & Relational Structure
+
+- **`food_sources`**: Stores verifiable recipe literature and culinary documentation (`id`, `title`, `publisher`, `url`, `source_type`, `publication_date`, `is_verified`, `notes`).
+- **`food_variants`**: Relational variant catalog linked to sources (`id`, `canonical_name`, `canonical_name_key`, `variant_name`, `variant_name_key`, `region_or_style`, `preparation_method`, `description`, `is_verified`, `source_id`).
+- **`food_variant_ingredients`**: Ingredient-level provenance (`id`, `variant_id`, `ingredient_name`, `ingredient_key`, `role`, `presence_type`, `source_id`, `notes`, `confidence`).
+- **`food_knowledge_aliases`**: Verified aliases mapping variations (e.g. `khaman`, `suji dhokla`, `kulche chole`) to canonical dishes.
+- **`food_knowledge`**: Dual-mode legacy/flattened table for backward compatibility.
+- **`food_agent_reports`**: Extended with `knowledge_json` column storing variant retrieval state, citations, and evidence.
+
+### 3. Operational Commands
+
+#### A. Database Migration
+Applies incremental, idempotent schema migrations without dropping existing data:
+```bash
+cd server
+npm run migrate
+```
+
+#### B. Seed / Import Verified Starter Records
+Populates verified culinary starter data (e.g., Khaman Dhokla, Rava Dhokla, Chole Bhature, Amritsari Kulcha Chole) with verified source citations:
+```bash
+cd server
+npm run seed:knowledge
+```
+To import custom JSON records:
+```bash
+node ai/agents/seedFoodKnowledge.js --json path/to/records.json
+```
+
+#### C. Ingredient Normalization & Key Backfilling
+Idempotently normalizes historical stored ingredient keys using canonical synonyms and singularization:
+```bash
+cd server
+npm run reindex:ingredients
+```
+
+#### D. Running Unit & Integration Tests
+Runs the test suite using mock database tables and deterministic fake Gemini responses without requiring external credentials:
+```bash
+cd server
+npm test
+```
+
+### 4. Safety Architecture & Verdict Guardrails
+
+- **Uploaded Food Guard**: If an allergen matches visible or traditional ingredients of the photographed plate, `avoid` is deterministically enforced.
+- **Per-Variant Allergy Guard**:
+  - `required` allergen in variant recipe -> Variant verdict is downgraded to `avoid` with a clear explanation.
+  - `optional` / `regional` allergen -> Variant verdict is held at `caution`, prompting the patient to verify restaurant preparation.
+  - Variant ingredients are never falsely attributed to the uploaded food analysis.
+- **Honest Uncertainty**: Missing nutritional facts or unverified recipe variations are explicitly labeled as `unknown` / `unverified` rather than hallucinating precise numbers.

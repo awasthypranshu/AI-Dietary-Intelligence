@@ -1,18 +1,42 @@
 # Dependencies
 node_modules/
+**/node_modules/
 
-# Environment variables
+# Environment variables & secrets (NEVER commit live credentials)
 .env
-server/.env
+.env.*
+*.env
+**/.env
+**/.env.*
+!**/.env.example
+
+# Build files & outputs
+dist/
+**/dist/
+dist-ssr/
 
 # Uploaded files
+uploads/
+**/uploads/
 server/uploads/
 
-# Build files
-dist/
-# Python virtual environment
-server/food-ai/bin/
-server/food-ai/include/
-server/food-ai/lib/
-server/food-ai/share/
-server/food-ai/pyvenv.cfg
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Python virtual environment & caches
+server/food-ai/
+__pycache__/
+*.pyc
+
+# Editor directories and files
+.vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

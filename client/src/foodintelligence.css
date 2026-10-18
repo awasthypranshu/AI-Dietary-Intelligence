@@ -162,3 +162,101 @@
     min-width: 100px;
   }
 }
+
+/* Badges for variant provenance */
+.fi-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.fi-badge-verified {
+  background: rgba(31, 157, 85, 0.18);
+  color: #1f9d55;
+  border: 1px solid rgba(31, 157, 85, 0.4);
+}
+
+.fi-badge-unverified {
+  background: rgba(217, 142, 4, 0.18);
+  color: #d98e04;
+  border: 1px solid rgba(217, 142, 4, 0.4);
+}
+
+.fi-badge-closest {
+  background: rgba(79, 140, 255, 0.18);
+  color: #4f8cff;
+  border: 1px solid rgba(79, 140, 255, 0.4);
+}
+
+.fi-badge-method {
+  background: rgba(128, 128, 128, 0.18);
+  color: inherit;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+}
+
+/* Documented ingredient presence types */
+.fi-ing-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 0.82rem;
+  margin: 3px;
+}
+
+.fi-ing-required {
+  background: rgba(214, 69, 69, 0.1);
+  border: 1px solid rgba(214, 69, 69, 0.35);
+  font-weight: 600;
+}
+
+.fi-ing-typical {
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.fi-ing-optional {
+  background: rgba(128, 128, 128, 0.05);
+  border: 1px dashed rgba(128, 128, 128, 0.4);
+  opacity: 0.85;
+}
+
+.fi-ing-regional {
+  background: rgba(155, 89, 182, 0.1);
+  border: 1px solid rgba(155, 89, 182, 0.35);
+}
+
+/* Patient concern highlight */
+.fi-variant-concerns {
+  background: rgba(214, 69, 69, 0.12);
+  border-left: 4px solid #d64545;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin: 8px 0;
+  font-size: 0.85rem;
+}
+
+/* Source citations */
+.fi-source-link {
+  color: #4f8cff;
+  text-decoration: underline;
+  word-break: break-all;
+  font-size: 0.82rem;
+}
+
+.fi-source-link:hover {
+  text-decoration: none;
+}
+
+/* Uncertainty note */
+.fi-uncertainty {
+  font-size: 0.8rem;
+  opacity: 0.75;
+  font-style: italic;
+  margin-top: 6px;
+}

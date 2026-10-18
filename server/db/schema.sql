@@ -152,12 +152,95 @@ CREATE TABLE IF NOT EXISTS food_agent_reports (
     verdict_json JSON NULL,
     personal_context_json JSON NULL,
     variants_json JSON NULL,
+    knowledge_json JSON NULL,
     agent_errors JSON NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (food_image_id) REFERENCES food_images(id) ON DELETE CASCADE,
     INDEX idx_food_agent_reports_user (user_id),
     INDEX idx_food_agent_reports_image (food_image_id)
+);
+
+CREATE TABLE IF NOT EXISTS food_sources (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    publisher VARCHAR(255) NULL,
+    url TEXT NULL,
+    source_type VARCHAR(50) NOT NULL,
+    publication_date VARCHAR(50) NULL,
+    access_date VARCHAR(50) NULL,
+    is_verified TINYINT(1) NOT NULL DEFAULT 0,
+    notes TEXT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS food_variants (
+    id VARCHAR(64) PRIMARY KEY,
+    canonical_name VARCHAR(150) NOT NULL,
+    canonical_name_key VARCHAR(150) NOT NULL,
+    variant_name VARCHAR(150) NOT NULL,
+    variant_name_key VARCHAR(150) NOT NULL,
+    region_or_style VARCHAR(150) NULL,
+    preparation_method VARCHAR(100) NULL,
+    description TEXT NULL,
+    is_verified TINYINT(1) NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    source_id VARCHAR(64) NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_food_variants_canonical (canonical_name_key),
+    INDEX idx_food_variants_variant (variant_name_key),
+    INDEX idx_food_variants_source (source_id),
+    UNIQUE KEY uq_food_variant (canonical_name_key, variant_name_key)
+);
+
+CREATE TABLE IF NOT EXISTS food_variant_ingredients (
+    id VARCHAR(64) PRIMARY KEY,
+    variant_id VARCHAR(64) NOT NULL,
+    ingredient_name VARCHAR(150) NOT NULL,
+    ingredient_key VARCHAR(150) NOT NULL,
+    role VARCHAR(100) NULL,
+    presence_type VARCHAR(50) NOT NULL,
+    source_id VARCHAR(64) NULL,
+    notes TEXT NULL,
+    confidence INT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (variant_id) REFERENCES food_variants(id) ON DELETE CASCADE,
+    INDEX idx_variant_ingredients_variant (variant_id),
+    INDEX idx_variant_ingredients_key (ingredient_key),
+    INDEX idx_variant_ingredients_source (source_id),
+    UNIQUE KEY uq_variant_ingredient (variant_id, ingredient_key, presence_type)
+);
+
+CREATE TABLE IF NOT EXISTS food_knowledge (
+    id VARCHAR(64) PRIMARY KEY,
+    canonical_name VARCHAR(255) NOT NULL,
+    canonical_name_key VARCHAR(255) NOT NULL,
+    variant_name VARCHAR(255) NOT NULL,
+    variant_name_key VARCHAR(255) NOT NULL,
+    region_or_style VARCHAR(200) NULL,
+    description TEXT NULL,
+    ingredients_json JSON NULL,
+    sources_json JSON NULL,
+    is_verified TINYINT(1) NOT NULL DEFAULT 0,
+    is_fixture TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_food_knowledge_canonical (canonical_name_key),
+    INDEX idx_food_knowledge_variant (variant_name_key),
+    UNIQUE KEY uq_food_knowledge_entry (canonical_name_key, variant_name_key)
+);
+
+CREATE TABLE IF NOT EXISTS food_knowledge_aliases (
+    id VARCHAR(64) PRIMARY KEY,
+    food_knowledge_id VARCHAR(64) NOT NULL,
+    canonical_name_key VARCHAR(150) NULL,
+    alias_key VARCHAR(255) NOT NULL,
+    alias_name VARCHAR(255) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (food_knowledge_id) REFERENCES food_knowledge(id) ON DELETE CASCADE,
+    INDEX idx_food_knowledge_aliases_key (alias_key),
+    INDEX idx_food_knowledge_aliases_canonical (canonical_name_key),
+    UNIQUE KEY uq_food_knowledge_alias (food_knowledge_id, alias_key)
 );
 
 CREATE TABLE IF NOT EXISTS meal_plans (

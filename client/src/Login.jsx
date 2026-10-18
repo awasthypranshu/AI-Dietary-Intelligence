@@ -164,7 +164,8 @@ function Login({ onLoginSuccess }) {
 
         if (!loginResponse.ok) {
           setMessage(
-            "Account created, but automatic login failed. Please log in."
+            loginData.message ||
+              "Account created, but automatic login failed. Please log in."
           );
 
           setMode("login");

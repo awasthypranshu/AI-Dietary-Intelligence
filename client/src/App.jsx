@@ -15,6 +15,156 @@ const API_URL =
   import.meta.env.VITE_API_URL ||
   "http://127.0.0.1:5001";
 
+function AuthenticatedNavbar({
+  onGoHome,
+  onGoDashboard,
+  onGoDigitalTwin,
+  onGoFoodGenome,
+  onProfileNavigation,
+  onLogout,
+  mobileMenuOpen,
+  setMobileMenuOpen,
+}) {
+  return (
+    <nav className="app-navbar">
+      <div className="app-navbar-inner">
+        <button
+          className="app-brand"
+          type="button"
+          onClick={onGoHome}
+          aria-label="Go to home"
+        >
+          <span className="app-brand-mark">AI</span>
+          <span className="app-brand-text">Dietary Intelligence</span>
+        </button>
+
+        <button
+          className="mobile-menu-button"
+          type="button"
+          onClick={() => setMobileMenuOpen((value) => !value)}
+          aria-label="Toggle navigation"
+          aria-expanded={mobileMenuOpen}
+        >
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+
+        <div className={`app-nav-links ${mobileMenuOpen ? "mobile-open" : ""}`}>
+          <button
+            type="button"
+            className="app-nav-link"
+            onClick={() => {
+              onGoHome();
+              setMobileMenuOpen(false);
+            }}
+          >
+            Home
+          </button>
+
+          <button
+            type="button"
+            className="app-nav-link"
+            onClick={() => {
+              onGoDashboard();
+              setMobileMenuOpen(false);
+            }}
+          >
+            Dashboard
+          </button>
+
+          <button
+            type="button"
+            className="app-nav-link"
+            onClick={() => {
+              onGoDigitalTwin();
+              setMobileMenuOpen(false);
+            }}
+          >
+            Digital Twin
+          </button>
+
+          <button
+            type="button"
+            className="app-nav-link"
+            onClick={() => {
+              onGoFoodGenome();
+              setMobileMenuOpen(false);
+            }}
+          >
+            Food Genome
+          </button>
+
+          <button
+            type="button"
+            className="app-nav-link"
+            onClick={() => {
+              onProfileNavigation();
+              setMobileMenuOpen(false);
+            }}
+          >
+            Profile
+          </button>
+
+          <button
+            type="button"
+            className="app-nav-logout"
+            onClick={() => {
+              onLogout();
+              setMobileMenuOpen(false);
+            }}
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+function PageNavigation({
+  backLabel = "Back",
+  onBack,
+  continueLabel,
+  onContinue,
+}) {
+  return (
+    <div className="page-navigation">
+      <button
+        className="page-back-button"
+        type="button"
+        onClick={onBack}
+      >
+        <span aria-hidden="true">←</span>
+        {backLabel}
+      </button>
+
+      {continueLabel && onContinue && (
+        <button
+          className="page-continue-button"
+          type="button"
+          onClick={onContinue}
+        >
+          {continueLabel}
+          <span aria-hidden="true">→</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AuthenticatedPage({ children, navigation, navbar }) {
+  return (
+    <div className="authenticated-layout">
+      {navbar}
+      <div className="authenticated-content">
+        {navigation}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   // ==================================================
   // PAGE STATE
@@ -38,12 +188,22 @@ function App() {
     useState(false);
 
   // ==================================================
+  // PASSWORD RESET PAGE
+  // ==================================================
+
+  const isResetPasswordPage =
+    typeof window !== "undefined" &&
+    window.location.pathname === "/reset-password";
+
+  // ==================================================
   // AUTHENTICATED USER
   // ==================================================
 
   const [currentUser, setCurrentUser] = useState(null);
   const [patientData, setPatientData] = useState(null);
-  const [checkingUser, setCheckingUser] = useState(true);
+  const [checkingUser, setCheckingUser] = useState(
+    () => !isResetPasswordPage
+  );
 
   // ==================================================
   // FEEDBACK
@@ -70,13 +230,6 @@ function App() {
 
   const [mobileMenuOpen, setMobileMenuOpen] =
     useState(false);
-
-  // ==================================================
-  // PASSWORD RESET PAGE
-  // ==================================================
-
-  const isResetPasswordPage =
-    window.location.pathname === "/reset-password";
 
   // ==================================================
   // RESET PAGE STATES
@@ -164,7 +317,6 @@ function App() {
 
   useEffect(() => {
     if (isResetPasswordPage) {
-      setCheckingUser(false);
       return;
     }
 
@@ -447,191 +599,24 @@ function App() {
     setShowDashboard(true);
   }
 
-  function handleBackToPreviousMainPage() {
-    if (openedFromDashboard) {
-      resetPages();
-      setShowDashboard(true);
-      return;
-    }
 
-    resetPages();
-    setShowDashboard(true);
-  }
 
   // ==================================================
-  // SHARED AUTHENTICATED NAVBAR
+  // SHARED AUTHENTICATED NAVBAR & LAYOUT
   // ==================================================
 
-  function AuthenticatedNavbar() {
-    return (
-      <nav className="app-navbar">
-        <div className="app-navbar-inner">
-
-          <button
-            className="app-brand"
-            type="button"
-            onClick={handleGoHome}
-            aria-label="Go to home"
-          >
-            <span className="app-brand-mark">
-              AI
-            </span>
-
-            <span className="app-brand-text">
-              Dietary Intelligence
-            </span>
-          </button>
-
-          <button
-            className="mobile-menu-button"
-            type="button"
-            onClick={() =>
-              setMobileMenuOpen(
-                (value) => !value
-              )
-            }
-            aria-label="Toggle navigation"
-            aria-expanded={mobileMenuOpen}
-          >
-            <span></span>
-            <span></span>
-            <span></span>
-          </button>
-
-          <div
-            className={`app-nav-links ${
-              mobileMenuOpen
-                ? "mobile-open"
-                : ""
-            }`}
-          >
-            <button
-              type="button"
-              className="app-nav-link"
-              onClick={() => {
-                handleGoHome();
-                setMobileMenuOpen(false);
-              }}
-            >
-              Home
-            </button>
-
-            <button
-              type="button"
-              className="app-nav-link"
-              onClick={() => {
-                handleGoDashboard();
-                setMobileMenuOpen(false);
-              }}
-            >
-              Dashboard
-            </button>
-
-            <button
-              type="button"
-              className="app-nav-link"
-              onClick={() => {
-                handleGoDigitalTwin();
-                setMobileMenuOpen(false);
-              }}
-            >
-              Digital Twin
-            </button>
-
-            <button
-              type="button"
-              className="app-nav-link"
-              onClick={() => {
-                handleGoFoodGenome();
-                setMobileMenuOpen(false);
-              }}
-            >
-              Food Genome
-            </button>
-
-            <button
-              type="button"
-              className="app-nav-link"
-              onClick={() => {
-                handleProfileNavigation();
-                setMobileMenuOpen(false);
-              }}
-            >
-              Profile
-            </button>
-
-            <button
-              type="button"
-              className="app-nav-logout"
-              onClick={() => {
-                handleLogout();
-                setMobileMenuOpen(false);
-              }}
-            >
-              Logout
-            </button>
-          </div>
-
-        </div>
-      </nav>
-    );
-  }
-
-  // ==================================================
-  // PAGE NAVIGATION BAR
-  // ==================================================
-
-  function PageNavigation({
-    backLabel = "Back",
-    onBack = handleBackToDashboard,
-    continueLabel,
-    onContinue,
-  }) {
-    return (
-      <div className="page-navigation">
-        <button
-          className="page-back-button"
-          type="button"
-          onClick={onBack}
-        >
-          <span aria-hidden="true">←</span>
-          {backLabel}
-        </button>
-
-        {continueLabel &&
-          onContinue && (
-            <button
-              className="page-continue-button"
-              type="button"
-              onClick={onContinue}
-            >
-              {continueLabel}
-              <span aria-hidden="true">→</span>
-            </button>
-          )}
-      </div>
-    );
-  }
-
-  // ==================================================
-  // AUTHENTICATED PAGE WRAPPER
-  // ==================================================
-
-  function AuthenticatedPage({
-    children,
-    navigation,
-  }) {
-    return (
-      <div className="authenticated-layout">
-        <AuthenticatedNavbar />
-
-        <div className="authenticated-content">
-          {navigation}
-          {children}
-        </div>
-      </div>
-    );
-  }
+  const authNavbar = (
+    <AuthenticatedNavbar
+      onGoHome={handleGoHome}
+      onGoDashboard={handleGoDashboard}
+      onGoDigitalTwin={handleGoDigitalTwin}
+      onGoFoodGenome={handleGoFoodGenome}
+      onProfileNavigation={handleProfileNavigation}
+      onLogout={handleLogout}
+      mobileMenuOpen={mobileMenuOpen}
+      setMobileMenuOpen={setMobileMenuOpen}
+    />
+  );
 
   // ==================================================
   // PASSWORD RESET PAGE
@@ -705,6 +690,7 @@ function App() {
   if (showProfile) {
     return (
       <AuthenticatedPage
+        navbar={authNavbar}
         navigation={
           <PageNavigation
             backLabel="Back to Dashboard"
@@ -752,6 +738,7 @@ function App() {
   if (showMedicalReport) {
     return (
       <AuthenticatedPage
+        navbar={authNavbar}
         navigation={
           <PageNavigation
             backLabel="Back"
@@ -822,6 +809,7 @@ function App() {
   if (showDigitalTwin) {
     return (
       <AuthenticatedPage
+        navbar={authNavbar}
         navigation={
           <PageNavigation
             backLabel="Back to Dashboard"
@@ -869,6 +857,7 @@ function App() {
   if (showFoodGenome) {
     return (
       <AuthenticatedPage
+        navbar={authNavbar}
         navigation={
           <PageNavigation
             backLabel="Back to Dashboard"
@@ -906,7 +895,7 @@ function App() {
 
   if (showDashboard) {
     return (
-      <AuthenticatedPage>
+      <AuthenticatedPage navbar={authNavbar}>
         <Dashboard
           patientData={
             patientData
@@ -953,6 +942,7 @@ function App() {
   if (showFoodUpload) {
     return (
       <AuthenticatedPage
+        navbar={authNavbar}
         navigation={
           <PageNavigation
             backLabel="Back to Dashboard"
@@ -990,6 +980,7 @@ function App() {
   if (showMealPlanner) {
     return (
       <AuthenticatedPage
+        navbar={authNavbar}
         navigation={
           <PageNavigation
             backLabel="Back to Dashboard"
@@ -1052,6 +1043,7 @@ function App() {
   if (showFoodHistory) {
     return (
       <AuthenticatedPage
+        navbar={authNavbar}
         navigation={
           <PageNavigation
             backLabel="Back"

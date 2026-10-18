@@ -3,6 +3,10 @@
 // Variant Agent's variants, then decides whether the food (and each
 // variant) is good for the patient. A deterministic allergy guard runs
 // AFTER the model so an allergy match can never be reported as "good".
+//
+// UPDATED: now supports per-variant personalized verdicts that use each
+// variant's own documented ingredients (from the knowledge base) for
+// allergy checking. Distinguishes confirmed vs possible ingredient presence.
 
 const { generateValidatedJson } = require("../geminiJson");
 const { cleanString, cleanConfidence } = require("../foodAnalysisValidator");
@@ -95,7 +99,11 @@ function findAllergyMatches(patient, foodAnalysis) {
     if (allergyWords.length === 0) continue;
 
     for (const ingredient of ingredients) {
-      const ingredientWords = normalizeWords(ingredient.name);
+      const name = typeof ingredient === "string" ? ingredient : ingredient.name;
+      const notes = typeof ingredient === "object" ? (ingredient.notes || "") : "";
+      const role = typeof ingredient === "object" ? (ingredient.role || "") : "";
+      const textToSearch = `${name} ${notes} ${role}`;
+      const ingredientWords = normalizeWords(textToSearch);
       const hit = allergyWords.some(
         (word) =>
           ingredientWords.includes(word) ||
@@ -105,8 +113,57 @@ function findAllergyMatches(patient, foodAnalysis) {
       if (hit) {
         matches.push({
           allergy: String(allergy),
-          ingredient: ingredient.name,
+          ingredient: name,
           category: ingredient.category,
+        });
+      }
+    }
+  }
+
+  return matches;
+}
+
+// ---------------------------------------------------------------------------
+// Per-variant allergy checking using documented ingredients
+// ---------------------------------------------------------------------------
+
+function findVariantAllergyMatches(patient, variant) {
+  const allergies = Array.isArray(patient?.allergies) ? patient.allergies : [];
+  if (allergies.length === 0) return [];
+
+  // Use documented ingredients if available, otherwise fall back to
+  // ingredient_changes data.
+  const ingredients = variant.documentedIngredients || [];
+  const matches = [];
+
+  for (const allergy of allergies) {
+    const allergyWords = normalizeWords(allergy);
+    if (allergyWords.length === 0) continue;
+
+    for (const ingredient of ingredients) {
+      const name = typeof ingredient === "string" ? ingredient : ingredient.name;
+      const notes = typeof ingredient === "object" ? (ingredient.notes || "") : "";
+      const role = typeof ingredient === "object" ? (ingredient.role || "") : "";
+      const textToSearch = `${name} ${notes} ${role}`;
+      const ingredientWords = normalizeWords(textToSearch);
+      const hit = allergyWords.some(
+        (word) =>
+          ingredientWords.includes(word) ||
+          ingredientWords.some((w) => w.startsWith(word) || word.startsWith(w))
+      );
+
+      if (hit) {
+        const classification = ingredient.classification || "typical";
+        // required and typical = confirmed presence; optional/regional/substitution = possible
+        const presence = ["required", "typical"].includes(classification)
+          ? "confirmed"
+          : "possible";
+
+        matches.push({
+          allergy: String(allergy),
+          ingredient: name,
+          classification,
+          presence,
         });
       }
     }
@@ -141,6 +198,78 @@ function applyAllergyGuard(result, matches) {
   return guarded;
 }
 
+// ---------------------------------------------------------------------------
+// Apply per-variant allergy guard using documented ingredient lists
+// ---------------------------------------------------------------------------
+
+function applyPerVariantAllergyGuards(result, patient, variantsData) {
+  const list = Array.isArray(variantsData)
+    ? variantsData
+    : Array.isArray(variantsData?.variants)
+    ? variantsData.variants
+    : [];
+
+  if (list.length === 0) return result;
+
+  const guarded = { ...result };
+  const existingMap = new Map(
+    (guarded.variantVerdicts || []).map((vv) => [vv.variantName.toLowerCase().trim(), vv])
+  );
+
+  const perVariantVerdicts = [];
+
+  for (const v of list) {
+    const vName = (v.name || "").trim();
+    if (!vName) continue;
+    const vv = existingMap.get(vName.toLowerCase()) || {
+      variantName: vName,
+      verdict: "good",
+      reason: v.description || "Alternative preparation.",
+    };
+
+    const matches = findVariantAllergyMatches(patient, v);
+
+    if (matches.length === 0) {
+      perVariantVerdicts.push(vv);
+      continue;
+    }
+
+    const hasConfirmedAllergy = matches.some((m) => m.presence === "confirmed");
+    const rank = { good: 0, insufficient_data: 0, caution: 1, avoid: 2 };
+    const floor = hasConfirmedAllergy ? "avoid" : "caution";
+    let newVerdict = vv.verdict;
+
+    if (rank[newVerdict] < rank[floor]) {
+      newVerdict = floor;
+    }
+
+    const allergyNotes = matches
+      .map((m) => {
+        const pNote =
+          m.presence === "confirmed"
+            ? "required recipe ingredient"
+            : "optional/possible ingredient";
+        return `Allergy "${m.allergy}" matches ${pNote} "${m.ingredient}" (${m.classification}).`;
+      })
+      .join(" ");
+
+    perVariantVerdicts.push({
+      ...vv,
+      verdict: newVerdict,
+      reason: allergyNotes + (vv.reason ? " " + vv.reason : ""),
+      allergyConflicts: matches,
+      allergyGuardTriggered: true,
+    });
+  }
+
+  guarded.variantVerdicts = perVariantVerdicts;
+  return guarded;
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 async function runVerdictAgent({
   gemini,
   patient,
@@ -148,6 +277,9 @@ async function runVerdictAgent({
   personalContext,
   variants,
 }) {
+  // Extract variant list from the new structured format or the old array.
+  const variantList = variants?.variants || (Array.isArray(variants) ? variants : null);
+
   const prompt = `
 You are the Verdict Agent in a dietary-intelligence system. Decide whether
 this food is good for this specific patient.
@@ -184,7 +316,16 @@ prescription, food history):
 ${personalContext ? JSON.stringify(personalContext, null, 2) : "NOT AVAILABLE - the evidence agent failed. Say so and lower your confidence."}
 
 POSSIBLE VARIANTS FROM THE VARIANT AGENT:
-${variants ? JSON.stringify(variants.map((v) => ({ name: v.name, description: v.description, ingredientChanges: v.ingredientChanges, nutritionVsUploaded: v.nutritionVsUploaded })), null, 2) : "NOT AVAILABLE"}
+${variantList ? JSON.stringify(variantList.map((v) => ({
+  name: v.name,
+  description: v.description,
+  ingredientChanges: v.ingredientChanges,
+  nutritionVsUploaded: v.nutritionVsUploaded,
+  documentedIngredients: v.documentedIngredients
+    ? v.documentedIngredients.map((i) => ({ name: i.name, classification: i.classification }))
+    : undefined,
+  dataSource: v.dataSource,
+})), null, 2) : "NOT AVAILABLE"}
 
 RULES
 - overall_verdict is one of: good, caution, avoid, insufficient_data.
@@ -192,6 +333,11 @@ RULES
   history or lab values. If evidence is thin, use "insufficient_data" or
   "caution" and list what is missing.
 - Treat suspected ingredients as possible, not certain.
+- When a variant has documented ingredients from the knowledge base, use
+  those for your analysis. Distinguish confirmed (required/typical) vs
+  possible (optional/regional/substitution) ingredient presence.
+- Do NOT give an unconditional "good" verdict when an allergy conflict or
+  material uncertainty exists.
 - Give a verdict for EACH variant (same schema) so the patient can see
   which version is better or worse for them.
 - Never diagnose, never change medication, and always recommend
@@ -218,16 +364,26 @@ Return one JSON object:
     temperature: 0.1,
   });
 
-  return applyAllergyGuard(
+  // Apply the overall allergy guard (original food ingredients).
+  let guarded = applyAllergyGuard(
     modelResult,
     findAllergyMatches(patient, foodAnalysis)
   );
+
+  // Apply per-variant allergy guards using documented ingredients.
+  if (variantList) {
+    guarded = applyPerVariantAllergyGuards(guarded, patient, { variants: variantList });
+  }
+
+  return guarded;
 }
 
 module.exports = {
   runVerdictAgent,
   validateVerdict,
   findAllergyMatches,
+  findVariantAllergyMatches,
   applyAllergyGuard,
+  applyPerVariantAllergyGuards,
   DISCLAIMER,
 };
