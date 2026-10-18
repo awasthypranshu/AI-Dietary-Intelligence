@@ -1,7 +1,12 @@
 const mysql = require("mysql2/promise");
 const path = require("path");
+// Load server/.env first, then the project-root .env (dotenv never
+// overwrites a value that is already set).
 require("dotenv").config({
   path: path.join(__dirname, "..", ".env"),
+});
+require("dotenv").config({
+  path: path.join(__dirname, "..", "..", ".env"),
 });
 
 const pool = mysql.createPool({

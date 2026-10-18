@@ -109,8 +109,55 @@ CREATE TABLE IF NOT EXISTS food_images (
     food_name VARCHAR(255),
     recognition_score DECIMAL(8,5),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    original_name VARCHAR(255) NULL,
+    uploaded_at DATETIME NULL,
+    cuisine VARCHAR(100) NULL,
+    food_style VARCHAR(150) NULL,
+    food_confidence TINYINT UNSIGNED NULL,
+    style_confidence TINYINT UNSIGNED NULL,
+    visible_ingredients JSON NULL,
+    suspected_ingredients JSON NULL,
+    traditional_ingredients JSON NULL,
+    estimated_serving JSON NULL,
+    nutrition_estimate JSON NULL,
+    limitations JSON NULL,
+    analysis_json JSON NULL,
+    analysis_model VARCHAR(100) NULL,
+    analyzed_at DATETIME NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_food_images_user_id (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS food_ingredients (
+    id VARCHAR(64) PRIMARY KEY,
+    food_image_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    ingredient_name VARCHAR(150) NOT NULL,
+    ingredient_key VARCHAR(150) NOT NULL,
+    category VARCHAR(20) NOT NULL,
+    confidence TINYINT UNSIGNED NULL,
+    role VARCHAR(150) NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (food_image_id) REFERENCES food_images(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_food_ingredients_image (food_image_id),
+    INDEX idx_food_ingredients_user_key (user_id, ingredient_key)
+);
+
+CREATE TABLE IF NOT EXISTS food_agent_reports (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    food_image_id VARCHAR(64) NOT NULL,
+    verdict VARCHAR(30) NULL,
+    verdict_json JSON NULL,
+    personal_context_json JSON NULL,
+    variants_json JSON NULL,
+    agent_errors JSON NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (food_image_id) REFERENCES food_images(id) ON DELETE CASCADE,
+    INDEX idx_food_agent_reports_user (user_id),
+    INDEX idx_food_agent_reports_image (food_image_id)
 );
 
 CREATE TABLE IF NOT EXISTS meal_plans (

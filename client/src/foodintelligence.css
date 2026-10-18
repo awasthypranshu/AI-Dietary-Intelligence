@@ -1,0 +1,164 @@
+
+/* Styles for AI Food Intelligence Results (FoodUpload.jsx) */
+
+.fi-muted {
+  opacity: 0.75;
+  font-size: 0.9rem;
+  margin: 4px 0;
+}
+
+/* Responsive grid layout */
+.fi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* Result panels */
+.fi-panel {
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.fi-panel h3 {
+  margin: 0 0 4px;
+}
+
+/* Chips and tags */
+.fi-chips {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fi-chips li {
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.88rem;
+}
+
+.fi-chips small {
+  opacity: 0.7;
+}
+
+.fi-chips em {
+  opacity: 0.7;
+  font-style: normal;
+}
+
+/* Lists */
+.fi-list {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+
+/* Confidence indicators */
+.fi-confidence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  font-size: 0.9rem;
+}
+
+.fi-confidence span {
+  min-width: 130px;
+}
+
+.fi-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.25);
+  overflow: hidden;
+}
+
+.fi-bar-fill {
+  height: 100%;
+  background: #4f8cff;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+/* Food verdict */
+.fi-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  margin: 8px 0 12px;
+  border-left: 6px solid #888;
+}
+
+.fi-verdict strong {
+  font-size: 1.25rem;
+}
+
+.fi-verdict-good {
+  border-left-color: #1f9d55;
+  background: rgba(31, 157, 85, 0.12);
+}
+
+.fi-verdict-caution {
+  border-left-color: #d98e04;
+  background: rgba(217, 142, 4, 0.14);
+}
+
+.fi-verdict-avoid {
+  border-left-color: #d64545;
+  background: rgba(214, 69, 69, 0.14);
+}
+
+.fi-verdict-insufficient_data {
+  border-left-color: #888;
+  background: rgba(128, 128, 128, 0.12);
+}
+
+/* Variant verdict */
+.fi-variant-verdict {
+  padding: 6px 10px;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-size: 0.88rem;
+  border-left: 4px solid #888;
+}
+
+/* Severity indicators */
+.fi-sev-high {
+  font-weight: 600;
+}
+
+/* Warning messages */
+.fi-warning {
+  border: 1px solid #d98e04;
+  background: rgba(217, 142, 4, 0.12);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 12px 0;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 600px) {
+  .fi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fi-panel {
+    padding: 10px 12px;
+  }
+
+  .fi-confidence {
+    flex-wrap: wrap;
+  }
+
+  .fi-confidence span {
+    min-width: 100px;
+  }
+}

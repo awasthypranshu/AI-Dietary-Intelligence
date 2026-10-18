@@ -4,7 +4,9 @@ const db = require("./db/connection");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { execFile } = require("child_process");
+const {
+  registerFoodIntelligenceRoutes,
+} = require("./routes/foodIntelligence");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
@@ -1808,208 +1810,21 @@ app.get(
     }
   }
 );
-
 // ==================================================
-// NUTRITION
-// ==================================================
-
-app.get(
-  "/nutrition",
-  async (req, res) => {
-    try {
-      const food =
-        req.query.food ||
-        "masala dosa";
-
-      const response =
-        await fetch(
-          `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${process.env.USDA_API_KEY}&query=${encodeURIComponent(
-            food
-          )}&pageSize=5`
-        );
-
-      if (!response.ok) {
-        return res
-          .status(response.status)
-          .json({
-            message:
-              "USDA API request failed.",
-          });
-      }
-
-      const data =
-        await response.json();
-
-      if (
-        !data.foods ||
-        data.foods.length === 0
-      ) {
-        return res.status(404).json({
-          message:
-            "No USDA nutrition data found for this food.",
-        });
-      }
-
-      const result =
-        data.foods[0];
-
-      const getNutrient =
-        (name) => {
-          const nutrient =
-            result.foodNutrients?.find(
-              (item) =>
-                item.nutrientName
-                  ?.toLowerCase() ===
-                name.toLowerCase()
-            );
-
-          return (
-            nutrient?.value ?? null
-          );
-        };
-
-      res.json({
-        foodName:
-          result.description,
-
-        fdcId:
-          result.fdcId,
-
-        calories:
-          getNutrient("Energy"),
-
-        protein:
-          getNutrient("Protein"),
-
-        carbohydrates:
-          getNutrient(
-            "Carbohydrate, by difference"
-          ),
-
-        fat:
-          getNutrient(
-            "Total lipid (fat)"
-          ),
-
-        fiber:
-          getNutrient(
-            "Fiber, total dietary"
-          ),
-      });
-    } catch (error) {
-      console.error(
-        "USDA nutrition error:",
-        error
-      );
-
-      res.status(500).json({
-        message:
-          "Could not retrieve nutrition data.",
-      });
-    }
-  }
-);
-
-// ==================================================
-// FOOD RECOGNITION
+// FOOD RECOGNITION, NUTRITION ESTIMATE AND FOOD AGENTS
 // ==================================================
 
-app.post(
-  "/recognize-food",
+registerFoodIntelligenceRoutes({
+  app,
+  db,
   requireAuth,
-  upload.single("foodImage"),
-  (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({
-          message:
-            "No food image uploaded.",
-        });
-      }
-
-      const pythonPath =
-        path.join(
-          __dirname,
-          "food-ai",
-          "bin",
-          "python3"
-        );
-
-      const scriptPath =
-        path.join(
-          __dirname,
-          "food_recognition.py"
-        );
-
-      execFile(
-        pythonPath,
-        [
-          scriptPath,
-          req.file.path,
-        ],
-        (
-          error,
-          stdout,
-          stderr
-        ) => {
-          if (error) {
-            console.error(
-              "Food recognition error:",
-              error
-            );
-
-            console.error(
-              "Python output:",
-              stderr
-            );
-
-            return res.status(500).json({
-              message:
-                "Food recognition failed.",
-            });
-          }
-
-          try {
-            const result =
-              JSON.parse(
-                stdout.trim()
-              );
-
-            res.json({
-              foodName:
-                result.foodName,
-
-              score:
-                result.score,
-            });
-          } catch (
-            parseError
-          ) {
-            console.error(
-              "Could not parse AI result:",
-              stdout
-            );
-
-            res.status(500).json({
-              message:
-                "Could not read food recognition result.",
-            });
-          }
-        }
-      );
-    } catch (error) {
-      console.error(
-        "Recognition route error:",
-        error
-      );
-
-      res.status(500).json({
-        message:
-          "Could not process food image.",
-      });
-    }
-  }
-);
+  storage,
+  gemini,
+  getAuthenticatedPatient,
+  getPersonalizationData,
+  buildFoodGenomeLearning,
+  getGeminiErrorMessage,
+});
 
 // ==================================================
 // PATIENT PROFILE
@@ -2584,28 +2399,64 @@ Rules:
 This is document extraction only, not medical diagnosis.
 `;
 
-      const aiResponse =
-        await gemini.models.generateContent({
-          model:
-            "gemini-3.5-flash",
 
-          contents: [
-            {
-              inlineData: {
-                mimeType:
-                  req.file.mimetype,
+const sleep = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-                data:
-                  reportBase64,
-              },
-            },
+let aiResponse;
+const maxAttempts = 3;
 
-            {
-              text:
-                extractionPrompt,
-            },
-          ],
-        });
+for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  try {
+    aiResponse = await gemini.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          inlineData: {
+            mimeType: req.file.mimetype,
+            data: reportBase64,
+          },
+        },
+        { text: extractionPrompt },
+      ],
+      config: {
+        httpOptions: {
+          timeout: 60000,
+          retryOptions: {
+            attempts: 1,
+          },
+        },
+      },
+    });
+
+    break;
+  } catch (error) {
+    const status = error.status ?? error.code;
+    const retryable =
+      status === 503 ||
+      status === 429 ||
+      status === 500 ||
+      status === 502 ||
+      status === 504 ||
+      error.cause?.code === "UND_ERR_CONNECT_TIMEOUT";
+
+    if (!retryable || attempt === maxAttempts) {
+      throw error;
+    }
+
+    console.warn(
+      `Gemini attempt ${attempt} failed; retrying shortly.`
+    );
+
+    await sleep(2000 * 2 ** (attempt - 1));
+  }
+}
+
+if (!aiResponse) {
+  throw new Error("Gemini did not return a response.");
+}
+
+
 
       const aiText =
         aiResponse.text || "";
@@ -3411,20 +3262,19 @@ app.post(
           disliked: dislikedFoods,
         };
 
-        currentPreferences[
-          status
-        ].push({
-          foodName,
+        const statusKey = String(status || "").toLowerCase().trim();
 
-          reaction,
+if (!Object.prototype.hasOwnProperty.call(currentPreferences, statusKey)) {
+  throw new Error(`Invalid food feedback status: ${status}`);
+}
 
-          notes,
-
-          source,
-
-          recordedAt:
-            now,
-        });
+currentPreferences[statusKey].push({
+  foodName,
+  reaction,
+  notes,
+  source,
+  recordedAt: now,
+});
 
         foods.push(
           genomeFoodEntry
@@ -3508,12 +3358,9 @@ app.post(
               )
             ),
             resolvedPatientName,
-            toJsonString(
-              genomeFoodEntry
-            ),
-            genome?.created_at ||
-              now,
-            now,
+now, // last_feedback must be a datetime
+genome?.created_at || now,
+now, // updated_at
           ]
         );
       }
@@ -3831,14 +3678,10 @@ app.post(
           toJsonString(
             dietaryFeedback
           ),
-          (twin?.feedback_count || 0) +
-            1,
-          toJsonString(
-            twinFeedback
-          ),
-          twin?.created_at ||
-            now,
-          now,
+         (twin?.feedback_count || 0) + 1,
+now, // ✅ last_dietary_feedback expects a DATETIME
+twin?.created_at || now,
+now,
         ]
       );
 
@@ -5162,13 +5005,10 @@ for professional medical advice.
 `;
 
       const response =
-        await gemini.models.generateContent({
-          model:
-            "gemini-3.5-flash",
-
-          contents:
-            prompt,
-        });
+  await gemini.models.generateContent({
+    model: "gemini-3.8-flash",
+    contents: prompt,
+  });
 
       const generatedMealPlan =
         response.text || "";

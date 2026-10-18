@@ -1,9 +1,73 @@
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
+import "./foodintelligence.css";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
   "http://127.0.0.1:5001";
+
+const VERDICT_LABELS = {
+  good: "Good choice",
+  caution: "Eat with caution",
+  avoid: "Better to avoid",
+  insufficient_data: "Not enough information",
+};
+
+function formatValue(value, unit = "") {
+  if (value === null || value === undefined) {
+    return "N/A";
+  }
+  return `${value}${unit ? ` ${unit}` : ""}`;
+}
+
+function ConfidenceBar({ label, value }) {
+  if (value === null || value === undefined) {
+    return (
+      <p className="fi-muted">
+        {label}: confidence not provided
+      </p>
+    );
+  }
+
+  return (
+    <div className="fi-confidence">
+      <span>{label}</span>
+      <div className="fi-bar">
+        <div
+          className="fi-bar-fill"
+          style={{ width: `${value}%` }}
+        />
+      </div>
+      <strong>{value}%</strong>
+    </div>
+  );
+}
+
+function IngredientPanel({ title, hint, items }) {
+  return (
+    <div className="fi-panel">
+      <h3>{title}</h3>
+      <p className="fi-muted">{hint}</p>
+      {items.length === 0 ? (
+        <p className="fi-muted">None listed.</p>
+      ) : (
+        <ul className="fi-chips">
+          {items.map((item) => (
+            <li key={item.name}>
+              {item.name}
+              {item.confidence !== null &&
+                item.confidence !== undefined && (
+                  <small> {item.confidence}%</small>
+                )}
+              {item.role && (
+                <em> · {item.role}</em>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function FoodUpload({
   onFoodUploaded,
@@ -15,21 +79,17 @@ function FoodUpload({
   const [message, setMessage] =
     useState("");
 
+  // Gemini food analysis (name, style, ingredients,
+  // estimated serving + nutrition, limitations)
   const [foodResult, setFoodResult] =
     useState(null);
 
-  const [nutrition, setNutrition] =
-    useState(null);
-
-  const [analysis, setAnalysis] =
+  // Output of the three AI agents
+  const [agentResult, setAgentResult] =
     useState(null);
 
   const [loading, setLoading] =
     useState(false);
-
-  // ==================================================
-  // FILE SELECTION
-  // ==================================================
 
   function handleFileChange(e) {
     const selectedFile =
@@ -38,24 +98,17 @@ function FoodUpload({
     setFile(selectedFile);
     setMessage("");
     setFoodResult(null);
-    setNutrition(null);
-    setAnalysis(null);
+    setAgentResult(null);
   }
 
   // ==================================================
-  // FOOD ANALYSIS FLOW
+  // FLOW
   //
-  // Upload
-  //   ↓
-  // Recognition
-  //   ↓
-  // USDA Nutrition
-  //   ↓
-  // Digital Twin + Food Genome
-  //   ↓
-  // Personalized AI Analysis
-  //   ↓
-  // User Feedback
+  // Upload -> Gemini recognition + nutrition estimate
+  //        -> Agent 1 (personal evidence / agentic RAG)
+  //        -> Agent 2 (food variants)
+  //        -> Agent 3 (verdict)
+  //        -> User feedback
   // ==================================================
 
   async function handleSubmit(e) {
@@ -77,35 +130,22 @@ function FoodUpload({
 
     setLoading(true);
     setMessage(
-      "Recognizing food..."
+      "Identifying the food and estimating nutrition..."
     );
-
     setFoodResult(null);
-    setNutrition(null);
-    setAnalysis(null);
+    setAgentResult(null);
 
-    const formData =
-      new FormData();
-
-    formData.append(
-      "foodImage",
-      file
-    );
+    const formData = new FormData();
+    formData.append("foodImage", file);
 
     try {
-      // ==================================================
-      // STEP 1 — FOOD RECOGNITION
-      // ==================================================
-
+      // STEP 1 - Gemini food recognition
       const recognitionResponse =
         await fetch(
           `${API_URL}/recognize-food`,
           {
             method: "POST",
-
-            credentials:
-              "include",
-
+            credentials: "include",
             body: formData,
           }
         );
@@ -113,139 +153,56 @@ function FoodUpload({
       const recognitionData =
         await recognitionResponse.json();
 
-      if (
-        !recognitionResponse.ok
-      ) {
+      if (!recognitionResponse.ok) {
         setMessage(
           recognitionData.message ||
             "Food recognition failed."
         );
-
         return;
       }
 
-      setFoodResult(
-        recognitionData
-      );
+      setFoodResult(recognitionData);
 
-      // ==================================================
-      // STEP 2 — USDA NUTRITION
-      // ==================================================
-
+      // STEP 2 - the three agents
       setMessage(
-        "Food recognized. Getting nutrition information..."
+        "Food identified. AI agents are checking your profile, report and food history..."
       );
 
-      const nutritionResponse =
-        await fetch(
-          `${API_URL}/nutrition?food=${encodeURIComponent(
-            recognitionData.foodName
-          )}`,
-          {
-            method: "GET",
-          }
-        );
+      const agentResponse = await fetch(
+        `${API_URL}/food-agents/analyze`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            foodImageId:
+              recognitionData.foodImageId,
+          }),
+        }
+      );
 
-      const nutritionData =
-        await nutritionResponse.json();
+      const agentData =
+        await agentResponse.json();
 
-      if (
-        !nutritionResponse.ok
-      ) {
+      if (!agentResponse.ok) {
         setMessage(
-          "Food was recognized, but nutrition information was not found."
+          agentData.message ||
+            "Food was identified, but the personalized analysis could not be completed."
         );
-
         return;
       }
 
-      setNutrition(
-        nutritionData
-      );
-
-      // ==================================================
-      // STEP 3 — PERSONALIZED ANALYSIS
-      // ==================================================
+      setAgentResult(agentData);
 
       setMessage(
-        "Checking your Digital Twin and Food Genome..."
-      );
-
-      /*
-       * The backend identifies the authenticated
-       * user through the HTTP-only session cookie.
-       *
-       * It retrieves:
-       *
-       * Digital Twin
-       *   - health profile
-       *   - medical information
-       *   - dietary experiences
-       *
-       * Food Genome
-       *   - liked/loved foods
-       *   - disliked foods
-       *   - previous reactions
-       *   - food history
-       *
-       * Example:
-       *
-       * Pizza
-       *   Preference: liked
-       *   Previous reaction:
-       *   acidity + bloating
-       *
-       * Gemini receives this context before
-       * generating the new food analysis.
-       */
-
-      const analysisResponse =
-        await fetch(
-          `${API_URL}/personalized-analysis`,
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-
-            credentials:
-              "include",
-
-            body: JSON.stringify({
-              patient:
-                patientData,
-
-              food:
-                recognitionData,
-
-              nutrition:
-                nutritionData,
-            }),
-          }
-        );
-
-      const analysisData =
-        await analysisResponse.json();
-
-      if (
-        !analysisResponse.ok
-      ) {
-        setMessage(
-          analysisData.message ||
-            "Could not generate personalized analysis."
-        );
-
-        return;
-      }
-
-      setAnalysis(
-        analysisData.analysis
-      );
-
-      setMessage(
-        "Personalized food analysis completed successfully."
+        agentData.agentErrors &&
+          Object.keys(agentData.agentErrors)
+            .length > 0
+          ? "Analysis finished, but some AI agents had problems (see below)."
+          : "Personalized food analysis completed successfully."
       );
     } catch (error) {
       console.error(
@@ -261,34 +218,38 @@ function FoodUpload({
     }
   }
 
-  // ==================================================
-  // CONTINUE TO SHARED USER FEEDBACK
-  // ==================================================
-
   function handleContinueToFeedback() {
-    if (
-      !foodResult?.foodName
-    ) {
+    if (!foodResult?.foodName) {
       return;
     }
 
     if (onFoodUploaded) {
       onFoodUploaded({
-        foodName:
-          foodResult.foodName,
-
+        foodName: foodResult.foodName,
         recognitionScore:
-          foodResult.score ??
-          null,
-
-        nutrition,
+          foodResult.score ?? null,
+        nutrition:
+          foodResult.analysis
+            ?.nutritionEstimate || null,
       });
     }
   }
 
-  // ==================================================
-  // UI
-  // ==================================================
+  const analysis = foodResult?.analysis;
+  const verdict = agentResult?.verdict;
+  const context =
+    agentResult?.personalContext;
+  const variants =
+    agentResult?.variants;
+
+  const variantVerdicts = {};
+  (verdict?.variantVerdicts || []).forEach(
+    (item) => {
+      variantVerdicts[
+        item.variantName.toLowerCase()
+      ] = item;
+    }
+  );
 
   return (
     <div className="food-page">
@@ -325,10 +286,11 @@ function FoodUpload({
 
         <p className="food-subtitle">
           Upload a photo of the food you are
-          about to eat. The system identifies
-          the food, retrieves its nutrition
-          information, and analyzes it using
-          your Digital Twin and Food Genome.
+          about to eat. AI identifies the food,
+          its style and ingredients, estimates
+          its nutrition, and three AI agents
+          check it against your health profile,
+          medical report and food history.
         </p>
 
         {/* ==================================================
@@ -354,7 +316,7 @@ function FoodUpload({
           </span>
 
           <span>
-            Nutrition
+            Estimate
           </span>
 
           <span>
@@ -362,7 +324,7 @@ function FoodUpload({
           </span>
 
           <span>
-            Analyze
+            AI Agents
           </span>
 
           <span>
@@ -387,7 +349,7 @@ function FoodUpload({
 
             <input
               type="file"
-              accept=".png,.jpg,.jpeg"
+              accept=".png,.jpg,.jpeg,.webp"
               onChange={
                 handleFileChange
               }
@@ -408,7 +370,7 @@ function FoodUpload({
             </p>
 
             <span>
-              JPG, JPEG or PNG
+              JPG, PNG or WEBP (max 8 MB)
             </span>
 
           </label>
@@ -458,179 +420,519 @@ function FoodUpload({
         )}
 
         {/* ==================================================
-            STEP 1 — FOOD RECOGNITION
-        ================================================== */}
-
-        {foodResult && (
-          <div className="food-result">
-
-            <p className="section-label">
-              FOOD RECOGNITION
-            </p>
-
-            <h2>
-              Identified Food
-            </h2>
-
-            <p>
-              <strong>
-                Food:
-              </strong>{" "}
-              {foodResult.foodName}
-            </p>
-
-            {typeof foodResult.score ===
-              "number" && (
-              <p>
-                <strong>
-                  Recognition Score:
-                </strong>{" "}
-                {(
-                  foodResult.score *
-                  100
-                ).toFixed(2)}
-                %
-              </p>
-            )}
-
-          </div>
-        )}
-
-        {/* ==================================================
-            STEP 2 — USDA NUTRITION
-        ================================================== */}
-
-        {nutrition && (
-          <div className="nutrition-result">
-
-            <p className="section-label">
-              NUTRITION
-            </p>
-
-            <h2>
-              Nutrition Information
-            </h2>
-
-            <p>
-              <strong>
-                Food:
-              </strong>{" "}
-              {nutrition.foodName}
-            </p>
-
-            <div className="nutrition-grid">
-
-              <div>
-                <strong>
-                  Calories
-                </strong>
-
-                <span>
-                  {nutrition.calories ??
-                    "N/A"}
-                </span>
-              </div>
-
-              <div>
-                <strong>
-                  Protein
-                </strong>
-
-                <span>
-                  {nutrition.protein ??
-                    "N/A"}{" "}
-                  g
-                </span>
-              </div>
-
-              <div>
-                <strong>
-                  Carbohydrates
-                </strong>
-
-                <span>
-                  {nutrition.carbohydrates ??
-                    "N/A"}{" "}
-                  g
-                </span>
-              </div>
-
-              <div>
-                <strong>
-                  Fat
-                </strong>
-
-                <span>
-                  {nutrition.fat ??
-                    "N/A"}{" "}
-                  g
-                </span>
-              </div>
-
-              <div>
-                <strong>
-                  Fiber
-                </strong>
-
-                <span>
-                  {nutrition.fiber ??
-                    "N/A"}{" "}
-                  g
-                </span>
-              </div>
-
-            </div>
-
-            <p className="nutrition-note">
-              Nutrition values are based on
-              the USDA food record returned
-              for the identified food and its
-              reported serving basis.
-            </p>
-
-          </div>
-        )}
-
-        {/* ==================================================
-            STEP 3 — PERSONALIZED ANALYSIS
+            1. FOOD IDENTIFICATION
         ================================================== */}
 
         {analysis && (
           <div className="food-result">
-
             <p className="section-label">
-              PERSONALIZED ANALYSIS
+              FOOD IDENTIFICATION
+            </p>
+
+            <h2>{analysis.foodName}</h2>
+
+            <p>
+              <strong>Style:</strong>{" "}
+              {analysis.foodStyle ||
+                "Could not determine"}
+              {analysis.cuisine
+                ? ` · ${analysis.cuisine} cuisine`
+                : ""}
+            </p>
+
+            <ConfidenceBar
+              label="Food confidence"
+              value={
+                analysis.confidence.food
+              }
+            />
+            <ConfidenceBar
+              label="Style confidence"
+              value={
+                analysis.confidence.style
+              }
+            />
+
+            {analysis.notes && (
+              <p className="fi-muted">
+                {analysis.notes}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ==================================================
+            2. INGREDIENTS (three separate lists)
+        ================================================== */}
+
+        {analysis && (
+          <div className="food-result">
+            <p className="section-label">
+              INGREDIENTS
+            </p>
+
+            <h2>What is in this food?</h2>
+
+            <div className="fi-grid">
+              <IngredientPanel
+                title="Visible"
+                hint="Clearly seen in the photo."
+                items={
+                  analysis.ingredients
+                    .visible
+                }
+              />
+              <IngredientPanel
+                title="Suspected"
+                hint="Not clearly visible, but likely present."
+                items={
+                  analysis.ingredients
+                    .suspected
+                }
+              />
+              <IngredientPanel
+                title="Traditional"
+                hint="Normally used in this exact food and style."
+                items={
+                  analysis.ingredients
+                    .traditional
+                }
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================
+            3. ESTIMATED SERVING + NUTRITION
+        ================================================== */}
+
+        {analysis && (
+          <div className="nutrition-result">
+            <p className="section-label">
+              NUTRITION (ESTIMATE)
             </p>
 
             <h2>
-              Your Food Suitability
+              Estimated Serving &amp;
+              Nutrition
             </h2>
 
-            <div className="ai-analysis-content">
+            <p>
+              <strong>
+                Estimated serving:
+              </strong>{" "}
+              {analysis.estimatedServing
+                .description ||
+                "Not estimated"}
+              {analysis.estimatedServing
+                .grams
+                ? ` (about ${analysis.estimatedServing.grams} g)`
+                : ""}
+            </p>
 
-              <ReactMarkdown>
-                {analysis}
-              </ReactMarkdown>
+            <ConfidenceBar
+              label="Serving confidence"
+              value={
+                analysis.estimatedServing
+                  .confidence
+              }
+            />
 
+            <div className="nutrition-grid">
+              {[
+                ["Calories", analysis.nutritionEstimate.calories, "kcal"],
+                ["Protein", analysis.nutritionEstimate.protein_g, "g"],
+                ["Carbohydrates", analysis.nutritionEstimate.carbohydrates_g, "g"],
+                ["Fat", analysis.nutritionEstimate.fat_g, "g"],
+                ["Saturated fat", analysis.nutritionEstimate.saturated_fat_g, "g"],
+                ["Fiber", analysis.nutritionEstimate.fiber_g, "g"],
+                ["Sugar", analysis.nutritionEstimate.sugar_g, "g"],
+                ["Sodium", analysis.nutritionEstimate.sodium_mg, "mg"],
+                ["Cholesterol", analysis.nutritionEstimate.cholesterol_mg, "mg"],
+              ].map(([label, value, unit]) => (
+                <div key={label}>
+                  <strong>{label}</strong>
+                  <span>
+                    ≈ {formatValue(value, unit)}
+                  </span>
+                </div>
+              ))}
             </div>
 
-            {/* ==================================================
-                SHARED USER FEEDBACK
-            ================================================== */}
+            {analysis.nutritionEstimate
+              .otherNutrients.length >
+              0 && (
+              <p className="fi-muted">
+                Other (estimated):{" "}
+                {analysis.nutritionEstimate.otherNutrients
+                  .map(
+                    (n) =>
+                      `${n.name} ≈ ${n.amount} ${n.unit}`
+                  )
+                  .join(", ")}
+              </p>
+            )}
 
+            <ConfidenceBar
+              label="Nutrition confidence"
+              value={
+                analysis.nutritionEstimate
+                  .confidence
+              }
+            />
+
+            <p className="nutrition-note">
+              All serving sizes and nutrition
+              values are AI estimates made from
+              a photo, not exact measurements.
+            </p>
+          </div>
+        )}
+
+        {/* ==================================================
+            4. LIMITATIONS
+        ================================================== */}
+
+        {analysis && (
+          <div className="food-result">
+            <p className="section-label">
+              LIMITATIONS
+            </p>
+
+            <h2>
+              What this analysis cannot know
+            </h2>
+
+            <ul className="fi-list">
+              {analysis.limitations.map(
+                (item) => (
+                  <li key={item}>{item}</li>
+                )
+              )}
+            </ul>
+          </div>
+        )}
+
+        {/* ==================================================
+            5. AGENT 3 - VERDICT
+        ================================================== */}
+
+        {agentResult?.agentErrors &&
+          Object.keys(
+            agentResult.agentErrors
+          ).length > 0 && (
+            <div className="fi-warning">
+              Some AI agents could not finish:{" "}
+              {Object.keys(
+                agentResult.agentErrors
+              ).join(", ")}
+              . Results below may be less
+              complete.
+            </div>
+          )}
+
+        {verdict && (
+          <div className="food-result">
+            <p className="section-label">
+              VERDICT FOR YOU
+            </p>
+
+            <div
+              className={`fi-verdict fi-verdict-${verdict.overallVerdict}`}
+            >
+              <strong>
+                {VERDICT_LABELS[
+                  verdict.overallVerdict
+                ] || verdict.overallVerdict}
+              </strong>
+              <span>{verdict.headline}</span>
+            </div>
+
+            <ConfidenceBar
+              label="Verdict confidence"
+              value={verdict.confidence}
+            />
+
+            {verdict.reasons.length > 0 && (
+              <>
+                <h3>Why</h3>
+                <ul className="fi-list">
+                  {verdict.reasons.map(
+                    (reason, index) => (
+                      <li
+                        key={index}
+                        className={`fi-sev-${reason.severity}`}
+                      >
+                        {reason.point}
+                        {reason.evidenceSource && (
+                          <small>
+                            {" "}
+                            ({reason.evidenceSource})
+                          </small>
+                        )}
+                      </li>
+                    )
+                  )}
+                </ul>
+              </>
+            )}
+
+            {verdict.ingredientsOfConcern
+              .length > 0 && (
+              <p>
+                <strong>
+                  Ingredients of concern:
+                </strong>{" "}
+                {verdict.ingredientsOfConcern.join(
+                  ", "
+                )}
+              </p>
+            )}
+
+            {verdict.recommendedPortion && (
+              <p>
+                <strong>
+                  Suggested portion:
+                </strong>{" "}
+                {verdict.recommendedPortion}
+              </p>
+            )}
+
+            {verdict.saferAlternatives.length >
+              0 && (
+              <p>
+                <strong>
+                  Safer alternatives:
+                </strong>{" "}
+                {verdict.saferAlternatives.join(
+                  ", "
+                )}
+              </p>
+            )}
+
+            {verdict.missingInformation
+              .length > 0 && (
+              <p className="fi-muted">
+                Would improve accuracy:{" "}
+                {verdict.missingInformation.join(
+                  "; "
+                )}
+              </p>
+            )}
+
+            <p className="nutrition-note">
+              {verdict.disclaimer}
+            </p>
+          </div>
+        )}
+
+        {/* ==================================================
+            6. AGENT 1 - PERSONAL EVIDENCE
+        ================================================== */}
+
+        {context && (
+          <div className="food-result">
+            <p className="section-label">
+              YOUR PERSONAL EVIDENCE
+            </p>
+
+            <h2>
+              What the AI looked at about you
+            </h2>
+
+            {context.evidenceSummary && (
+              <p>{context.evidenceSummary}</p>
+            )}
+
+            {context.relevantConditions
+              .length > 0 && (
+              <>
+                <h3>Relevant conditions</h3>
+                <ul className="fi-list">
+                  {context.relevantConditions.map(
+                    (item, i) => (
+                      <li key={i}>
+                        {item.condition}
+                        {item.why_relevant
+                          ? `: ${item.why_relevant}`
+                          : ""}
+                      </li>
+                    )
+                  )}
+                </ul>
+              </>
+            )}
+
+            {context.pastReactionsToThisFood
+              .length > 0 && (
+              <>
+                <h3>Your past reactions</h3>
+                <ul className="fi-list">
+                  {context.pastReactionsToThisFood.map(
+                    (item, i) => (
+                      <li key={i}>
+                        {item.reaction}
+                        {item.note
+                          ? ` - ${item.note}`
+                          : ""}
+                      </li>
+                    )
+                  )}
+                </ul>
+              </>
+            )}
+
+            {context.similarFoodEvidence
+              .length > 0 && (
+              <>
+                <h3>
+                  Similar foods you have eaten
+                </h3>
+                <ul className="fi-list">
+                  {context.similarFoodEvidence.map(
+                    (item, i) => (
+                      <li key={i}>
+                        {item.food}
+                        {item.shared_ingredients
+                          ? ` (shares: ${item.shared_ingredients})`
+                          : ""}
+                        {item.past_reaction
+                          ? ` - ${item.past_reaction}`
+                          : ""}
+                      </li>
+                    )
+                  )}
+                </ul>
+              </>
+            )}
+
+            <p className="fi-muted">
+              Data sources checked:{" "}
+              {[
+                ...new Set(
+                  (context.toolsUsed || []).map(
+                    (t) =>
+                      t.tool.replace(/_/g, " ")
+                  )
+                ),
+              ].join(", ") || "none"}
+            </p>
+          </div>
+        )}
+
+        {/* ==================================================
+            7. AGENT 2 - FOOD VARIANTS
+        ================================================== */}
+
+        {variants && (
+          <div className="food-result">
+            <p className="section-label">
+              FOOD VARIANTS
+            </p>
+
+            <h2>
+              Other versions of this food
+            </h2>
+
+            <div className="fi-grid">
+              {variants.map((variant) => {
+                const vv =
+                  variantVerdicts[
+                    variant.name.toLowerCase()
+                  ];
+
+                return (
+                  <div
+                    className="fi-panel"
+                    key={variant.name}
+                  >
+                    <h3>
+                      {variant.name}
+                      {variant.matchesUploadedFood && (
+                        <small>
+                          {" "}
+                          (closest to your photo)
+                        </small>
+                      )}
+                    </h3>
+
+                    <p className="fi-muted">
+                      {variant.regionOrStyle}
+                    </p>
+                    <p>{variant.description}</p>
+
+                    {variant.ingredientChanges
+                      .added.length > 0 && (
+                      <p>
+                        <strong>Adds:</strong>{" "}
+                        {variant.ingredientChanges.added.join(
+                          ", "
+                        )}
+                      </p>
+                    )}
+                    {variant.ingredientChanges
+                      .removed.length > 0 && (
+                      <p>
+                        <strong>Removes:</strong>{" "}
+                        {variant.ingredientChanges.removed.join(
+                          ", "
+                        )}
+                      </p>
+                    )}
+
+                    <p className="fi-muted">
+                      vs your photo - calories:{" "}
+                      {
+                        variant.nutritionVsUploaded
+                          .calories
+                      }
+                      , carbs:{" "}
+                      {
+                        variant.nutritionVsUploaded
+                          .carbohydrates
+                      }
+                      , fat:{" "}
+                      {
+                        variant.nutritionVsUploaded
+                          .fat
+                      }
+                    </p>
+
+                    {vv && (
+                      <p
+                        className={`fi-variant-verdict fi-verdict-${vv.verdict}`}
+                      >
+                        {VERDICT_LABELS[
+                          vv.verdict
+                        ] || vv.verdict}
+                        {vv.reason
+                          ? `: ${vv.reason}`
+                          : ""}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================
+            SHARED USER FEEDBACK
+        ================================================== */}
+
+        {foodResult && (
+          <div className="food-result">
             <div className="food-feedback-next">
-
               <p className="section-label">
                 NEXT STEP
               </p>
 
-              <h3>
-                Tell Your Food Genome
-              </h3>
+              <h3>Tell Your Food Genome</h3>
 
               <p className="food-subtitle">
-                After eating this food, record
-                how you felt. Your preference and
+                After eating this food, record how
+                you felt. Your preference and
                 physical reaction are stored
                 separately so future decisions
                 become more personalized.
@@ -645,9 +947,7 @@ function FoodUpload({
               >
                 Continue to Feedback →
               </button>
-
             </div>
-
           </div>
         )}
 
